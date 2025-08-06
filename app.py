@@ -4,21 +4,25 @@ import pandas as pd
 
 app = Flask(__name__)
 
+# API credentials and campaign info
 API_KEY = "25c787e461c18a4a2a502ce49423a2808a68da65"
 CAMPAIGN_ID = "323747"
 
+# Offer IDs per tier
 OFFERS = {
     "tier_1": "11558",
     "tier_2": "22222",
     "tier_3": "33333"
 }
 
+# CSV export links from Google Sheets
 SHEET_URLS = {
     "tier_1": "https://docs.google.com/spreadsheets/d/14tfAgIgF7KNPHHbsHb3ImTSs5TFAq_WWpNK9x1xSDqA/export?format=csv",
     "tier_2": "https://docs.google.com/spreadsheets/d/1xAV99d2YvNHlYvxuc6NJxqoPYBHNdJGdMHAbI6I9rDc/export?format=csv",
     "tier_3": "https://docs.google.com/spreadsheets/d/11-Z0OgDCAJEssNgN93_Y9Whl8405YETyqBFio3aSXbw/export?format=csv"
 }
 
+# Load ZIP codes from each tier's Google Sheet
 def load_zip_sets():
     zip_sets = {}
     for tier, url in SHEET_URLS.items():
@@ -30,6 +34,12 @@ def load_zip_sets():
             zip_sets[tier] = set()
     return zip_sets
 
+# Home route to confirm the webhook is live
+@app.route("/", methods=["GET"])
+def home():
+    return "Webhook is running", 200
+
+# Handle incoming call events
 @app.route("/call-event", methods=["POST"])
 def handle_call():
     data = request.json
