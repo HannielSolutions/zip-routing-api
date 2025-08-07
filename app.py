@@ -4,42 +4,39 @@ import pandas as pd
 
 app = Flask(__name__)
 
-# API credentials and campaign info
+# Constants
 API_KEY = "25c787e461c18a4a2a502ce49423a2808a68da65"
 CAMPAIGN_ID = "323747"
 
-# Offer IDs per tier
 OFFERS = {
-    "tier_1": "11558",
+    "tier_1": "11558",  # Update with your actual offer IDs if different
     "tier_2": "22222",
     "tier_3": "33333"
 }
 
-# CSV export links from Google Sheets
-SHEET_URLS = {
-    "tier_1": "https://docs.google.com/spreadsheets/d/14tfAgIgF7KNPHHbsHb3ImTSs5TFAq_WWpNK9x1xSDqA/export?format=csv",
-    "tier_2": "https://docs.google.com/spreadsheets/d/1xAV99d2YvNHlYvxuc6NJxqoPYBHNdJGdMHAbI6I9rDc/export?format=csv",
-    "tier_3": "https://docs.google.com/spreadsheets/d/11-Z0OgDCAJEssNgN93_Y9Whl8405YETyqBFio3aSXbw/export?format=csv"
+EXCEL_FILES = {
+    "tier_1": "Tier 1.xlsx",
+    "tier_2": "Tier 2.xlsx",
+    "tier_3": "Tier 3.xlsx"
 }
 
-# Load ZIP codes from each tier's Google Sheet
+# Load ZIP codes from Excel files
 def load_zip_sets():
     zip_sets = {}
-    for tier, url in SHEET_URLS.items():
+    for tier, filepath in EXCEL_FILES.items():
         try:
-            df = pd.read_csv(url)
-            zip_sets[tier] = set(df.iloc[:, 0].astype(str).str.strip())
+            df = pd.read_excel(filepath)
+            zip_column = df.columns[0]
+            zip_sets[tier] = set(df[zip_column].astype(str).str.strip())
         except Exception as e:
-            print(f"Failed to load ZIPs for {tier}: {e}")
+            print(f"Error loading {tier} ZIPs: {e}")
             zip_sets[tier] = set()
     return zip_sets
 
-# Home route to confirm the webhook is live
 @app.route("/", methods=["GET"])
 def home():
-    return "Webhook is running", 200
+    return "Webhook is running"
 
-# Handle incoming call events
 @app.route("/call-event", methods=["POST"])
 def handle_call():
     data = request.json
@@ -86,4 +83,4 @@ def handle_call():
     }), 200
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host="0.0.0.0", port=5000)
