@@ -224,6 +224,11 @@ def handle_call():
                 f"https://www.marketcall.com/api/v1/affiliate/offers/{offer_id}/bid-requests",
                 headers=headers, json=payload, timeout=30
             )
+            
+            logger.info(f"MarketCall API response status: {response.status_code}")
+            logger.info(f"MarketCall API response headers: {dict(response.headers)}")
+            logger.info(f"MarketCall API response body: {response.text}")
+            
             response.raise_for_status()
             
             return jsonify({
@@ -232,9 +237,21 @@ def handle_call():
                 "marketcall_response": response.json()
             }), 200
             
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
-            return jsonify({"error": "MarketCall API request failed"}), 502
+            logger.error(f"Response status: {getattr(e.response, 'status_code', 'No response')}")
+            logger.error(f"Response text: {getattr(e.response, 'text', 'No response text')}")
+            
+            # Return detailed error info
+            error_details = {
+                "error": "MarketCall API request failed",
+                "api_url": f"https://www.marketcall.com/api/v1/affiliate/offers/{offer_id}/bid-requests",
+                "payload_sent": payload,
+                "headers_sent": {k: v for k, v in headers.items() if k != "X-Api-Key"},  # Hide API key
+                "status_code": getattr(e.response, 'status_code', None),
+                "response_text": getattr(e.response, 'text', None)
+            }
+            return jsonify(error_details), 502
             
     except Exception as e:
         logger.error(f"Error in handle_call: {e}")
