@@ -200,78 +200,82 @@ def test_caller_id():
 @app.route("/test-marketcall-api", methods=["POST"])
 def test_marketcall_api():
     """Test MarketCall API with different parameter formats."""
-    data = request.get_json()
-    caller_id = data.get("caller_id", "2345678900")
-    zip_code = data.get("zip_code", "07004")
-    
-    # Test different formats
-    test_cases = [
-        {
-            "name": "10_digit_caller_zip_padded",
-            "payload": {
-                "campaign_id": CAMPAIGN_ID,
-                "caller_id": caller_id[-10:],  # Last 10 digits
-                "zip_code": str(zip_code).zfill(5)  # Zero-padded
+    try:
+        data = request.get_json()
+        caller_id = data.get("caller_id", "2345678900")
+        zip_code = data.get("zip_code", "07004")
+        
+        # Clean inputs
+        digits_only = ''.join(filter(str.isdigit, str(caller_id)))
+        zip_digits = ''.join(filter(str.isdigit, str(zip_code)))
+        
+        # Test different formats
+        test_cases = [
+            {
+                "name": "10_digit_caller_zip_padded",
+                "payload": {
+                    "campaign_id": CAMPAIGN_ID,
+                    "caller_id": digits_only[-10:],  # Last 10 digits
+                    "zip_code": zip_digits.zfill(5)  # Zero-padded
+                }
+            },
+            {
+                "name": "11_digit_caller_zip_padded", 
+                "payload": {
+                    "campaign_id": CAMPAIGN_ID,
+                    "caller_id": clean_caller_id(caller_id),  # 11 digits with country code
+                    "zip_code": zip_digits.zfill(5)
+                }
+            },
+            {
+                "name": "10_digit_caller_zip_unpadded",
+                "payload": {
+                    "campaign_id": CAMPAIGN_ID,
+                    "caller_id": digits_only[-10:],
+                    "zip_code": zip_digits.lstrip('0') or '0'  # Remove leading zeros safely
+                }
             }
-        },
-        {
-            "name": "11_digit_caller_zip_padded", 
-            "payload": {
-                "campaign_id": CAMPAIGN_ID,
-                "caller_id": clean_caller_id(caller_id),  # 11 digits with country code
-                "zip_code": str(zip_code).zfill(5)
-            }
-        },
-        {
-            "name": "10_digit_caller_zip_unpadded",
-            "payload": {
-                "campaign_id": CAMPAIGN_ID,
-                "caller_id": caller_id[-10:],
-                "zip_code": str(int(zip_code))  # Remove leading zeros
-            }
-        },
-        {
-            "name": "11_digit_caller_zip_unpadded",
-            "payload": {
-                "campaign_id": CAMPAIGN_ID,
-                "caller_id": clean_caller_id(caller_id),
-                "zip_code": str(int(zip_code))
-            }
-        }
-    ]
-    
-    results = []
-    headers = {"X-Api-Key": API_KEY, "Content-Type": "application/json; charset=utf-8"}
-    
-    for test_case in test_cases:
-        try:
-            response = requests.post(
-                f"https://www.marketcall.com/api/v1/affiliate/offers/11558/bid-requests",
-                headers=headers,
-                json=test_case["payload"],
-                timeout=10
-            )
-            
-            results.append({
-                "test": test_case["name"],
-                "payload": test_case["payload"],
-                "status_code": response.status_code,
-                "response": response.text,
-                "success": response.status_code == 200
-            })
-            
-        except Exception as e:
-            results.append({
-                "test": test_case["name"],
-                "payload": test_case["payload"],
-                "error": str(e),
-                "success": False
-            })
-    
-    return jsonify({
-        "input": {"caller_id": caller_id, "zip_code": zip_code},
-        "results": results
-    })
+        ]
+        
+        results = []
+        headers = {"X-Api-Key": API_KEY, "Content-Type": "application/json; charset=utf-8"}
+        
+        for test_case in test_cases:
+            try:
+                logger.info(f"Testing MarketCall API with: {test_case}")
+                response = requests.post(
+                    f"https://www.marketcall.com/api/v1/affiliate/offers/11558/bid-requests",
+                    headers=headers,
+                    json=test_case["payload"],
+                    timeout=10
+                )
+                
+                results.append({
+                    "test": test_case["name"],
+                    "payload": test_case["payload"],
+                    "status_code": response.status_code,
+                    "response": response.text,
+                    "success": response.status_code == 200
+                })
+                
+            except Exception as e:
+                logger.error(f"Test case {test_case['name']} failed: {e}")
+                results.append({
+                    "test": test_case["name"],
+                    "payload": test_case["payload"],
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return jsonify({
+            "input": {"caller_id": caller_id, "zip_code": zip_code},
+            "cleaned": {"digits": digits_only, "zip": zip_digits},
+            "results": results
+        })
+        
+    except Exception as e:
+        logger.error(f"test_marketcall_api failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/", methods=["GET"])
 def home():
