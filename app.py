@@ -4,54 +4,56 @@ import pandas as pd
 
 app = Flask(__name__)
 
-# Constants
+# === Configuration ===
 API_KEY = "25c787e461c18a4a2a502ce49423a2808a68da65"
 CAMPAIGN_ID = "323747"
 
 OFFERS = {
-    "tier_1": "11558",  # Update with your actual offer IDs if different
+    "tier_1": "11558",
     "tier_2": "22222",
     "tier_3": "33333"
 }
 
-# Corrected Excel files dict
 SHEET_FILES = {
     "tier_1": "Tier 1.xlsx",
     "tier_2": "Tier 2.xlsx",
     "tier_3": "Tier 3.xlsx"
 }
 
-# ✅ Only load column A, make sure ZIPs are 5-digit strings
+# === Load ZIPs ===
 def load_zip_sets():
     zip_sets = {}
     for tier, filename in SHEET_FILES.items():
         try:
-            df = pd.read_excel(filename, usecols=[0], dtype={0: str})  # Force column to string
-            zips = df.iloc[:, 0].astype(str).str.zfill(5).str.strip()
-            zip_sets[tier] = set(zips)
+            df = pd.read_excel(filename, usecols=[0], dtype={0: str})
+            zip_list = df.iloc[:, 0].astype(str).str.zfill(5).str.strip()
+            zip_sets[tier] = set(zip_list)
+            print(f"{tier} ZIPs loaded: {len(zip_sets[tier])}")
         except Exception as e:
             print(f"Failed to load ZIPs for {tier}: {e}")
             zip_sets[tier] = set()
     return zip_sets
 
-
-# Home route for testing
+# === Home Route ===
 @app.route("/", methods=["GET"])
 def home():
     return "Webhook is running"
 
-# Webhook route
+# === Call Event Route ===
 @app.route("/call-event", methods=["POST"])
 def handle_call():
     data = request.json
     caller_id = data.get("caller_id")
     zip_code = str(data.get("zip_code")).strip().zfill(5)
 
+    print(f"Received ZIP: {zip_code}")
+
     if not caller_id or not zip_code:
         return jsonify({"error": "Missing caller_id or zip_code"}), 400
 
     zip_sets = load_zip_sets()
 
+    # Match ZIP to Tier
     if zip_code in zip_sets["tier_1"]:
         tier = "tier_1"
     elif zip_code in zip_sets["tier_2"]:
@@ -59,10 +61,10 @@ def handle_call():
     elif zip_code in zip_sets["tier_3"]:
         tier = "tier_3"
     else:
-        return jsonify({
-            "status": "ZIP code not in any tier — no ping sent"
-        }), 200
+        print("ZIP not found in any tier.")
+        return jsonify({"status": "ZIP code not in any tier — no ping sent"}), 200
 
+    # Prepare payload
     payload = {
         "campaign_id": CAMPAIGN_ID,
         "caller_id": caller_id,
@@ -86,5 +88,6 @@ def handle_call():
         "marketcall_response": response.json()
     }), 200
 
+# === Run Flask ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
