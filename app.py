@@ -26,12 +26,14 @@ def load_zip_sets():
     zip_sets = {}
     for tier, filename in SHEET_FILES.items():
         try:
-            df = pd.read_excel(filename, usecols=[0])  # Only first column
-            zip_sets[tier] = set(df.iloc[:, 0].astype(str).str.zfill(5).str.strip())
+            df = pd.read_excel(filename, usecols=[0], dtype={0: str})  # Force column to string
+            zips = df.iloc[:, 0].astype(str).str.zfill(5).str.strip()
+            zip_sets[tier] = set(zips)
         except Exception as e:
             print(f"Failed to load ZIPs for {tier}: {e}")
             zip_sets[tier] = set()
     return zip_sets
+
 
 # Home route for testing
 @app.route("/", methods=["GET"])
