@@ -12,7 +12,12 @@ logger = logging.getLogger(__name__)
 # Configuration
 API_KEY = os.environ.get("API_KEY", "25c787e461c18a4a2a502ce49423a2808a68da65")
 CAMPAIGN_ID = "323747"
-OFFERS = {"tier_1": "11558", "tier_2": "22222", "tier_3": "33333"}
+# You need to replace these with your actual MarketCall offer IDs
+OFFERS = {
+    "tier_1": "11558",    # ✅ This one works - keep it
+    "tier_2": "11558",    # 🔧 TEMPORARY: Use same offer until you get real ID
+    "tier_3": "11558"     # 🔧 TEMPORARY: Use same offer until you get real ID
+}
 
 # All data is in tier 1 file
 EXCEL_URL = "https://raw.githubusercontent.com/HannielSolutions/zip-routing-api/main/Tier%201.xlsx"
