@@ -166,6 +166,113 @@ def test_download(tier):
         "all_zips": sorted(list(zip_set)) if len(zip_set) < 50 else "too_many_to_show"
     })
 
+# Test caller_id format endpoint
+@app.route("/test-caller-id", methods=["POST"])
+def test_caller_id():
+    """Test different caller_id formats to see what works."""
+    data = request.get_json()
+    caller_id = data.get("caller_id")
+    
+    if not caller_id:
+        return jsonify({"error": "Missing caller_id"}), 400
+    
+    # Test different formats
+    formats = {
+        "original": caller_id,
+        "digits_only": ''.join(filter(str.isdigit, str(caller_id))),
+        "without_country_code": ''.join(filter(str.isdigit, str(caller_id)))[1:] if ''.join(filter(str.isdigit, str(caller_id))).startswith('1') else ''.join(filter(str.isdigit, str(caller_id))),
+        "with_dashes": None,
+        "with_parentheses": None
+    }
+    
+    digits = ''.join(filter(str.isdigit, str(caller_id)))
+    if len(digits) == 10:
+        formats["with_dashes"] = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+        formats["with_parentheses"] = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    
+    return jsonify({
+        "input": caller_id,
+        "formats": formats,
+        "recommendation": formats["digits_only"][1:] if len(formats["digits_only"]) == 11 and formats["digits_only"].startswith('1') else formats["digits_only"]
+    })
+
+# Test MarketCall API directly
+@app.route("/test-marketcall-api", methods=["POST"])
+def test_marketcall_api():
+    """Test MarketCall API with different parameter formats."""
+    data = request.get_json()
+    caller_id = data.get("caller_id", "2345678900")
+    zip_code = data.get("zip_code", "07004")
+    
+    # Test different formats
+    test_cases = [
+        {
+            "name": "10_digit_caller_zip_padded",
+            "payload": {
+                "campaign_id": CAMPAIGN_ID,
+                "caller_id": caller_id[-10:],  # Last 10 digits
+                "zip_code": str(zip_code).zfill(5)  # Zero-padded
+            }
+        },
+        {
+            "name": "11_digit_caller_zip_padded", 
+            "payload": {
+                "campaign_id": CAMPAIGN_ID,
+                "caller_id": clean_caller_id(caller_id),  # 11 digits with country code
+                "zip_code": str(zip_code).zfill(5)
+            }
+        },
+        {
+            "name": "10_digit_caller_zip_unpadded",
+            "payload": {
+                "campaign_id": CAMPAIGN_ID,
+                "caller_id": caller_id[-10:],
+                "zip_code": str(int(zip_code))  # Remove leading zeros
+            }
+        },
+        {
+            "name": "11_digit_caller_zip_unpadded",
+            "payload": {
+                "campaign_id": CAMPAIGN_ID,
+                "caller_id": clean_caller_id(caller_id),
+                "zip_code": str(int(zip_code))
+            }
+        }
+    ]
+    
+    results = []
+    headers = {"X-Api-Key": API_KEY, "Content-Type": "application/json; charset=utf-8"}
+    
+    for test_case in test_cases:
+        try:
+            response = requests.post(
+                f"https://www.marketcall.com/api/v1/affiliate/offers/11558/bid-requests",
+                headers=headers,
+                json=test_case["payload"],
+                timeout=10
+            )
+            
+            results.append({
+                "test": test_case["name"],
+                "payload": test_case["payload"],
+                "status_code": response.status_code,
+                "response": response.text,
+                "success": response.status_code == 200
+            })
+            
+        except Exception as e:
+            results.append({
+                "test": test_case["name"],
+                "payload": test_case["payload"],
+                "error": str(e),
+                "success": False
+            })
+    
+    return jsonify({
+        "input": {"caller_id": caller_id, "zip_code": zip_code},
+        "results": results
+    })
+
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "Webhook is running", "version": "2.0"})
@@ -196,7 +303,9 @@ def handle_call():
             return jsonify({"error": "Missing caller_id or zip_code"}), 400
             
         zip_code = str(zip_code_raw).strip().zfill(5)
+        cleaned_caller_id = clean_caller_id(caller_id)
         logger.info(f"Processing ZIP: {zip_code_raw} -> {zip_code}")
+        logger.info(f"Processing caller_id: {caller_id} -> {cleaned_caller_id}")
         
         # Load ZIP sets and find tier
         zip_sets = load_zip_sets()
@@ -216,7 +325,7 @@ def handle_call():
         
         # Make API request
         offer_id = OFFERS[tier]
-        payload = {"campaign_id": CAMPAIGN_ID, "caller_id": caller_id, "zip_code": zip_code}
+        payload = {"campaign_id": CAMPAIGN_ID, "caller_id": cleaned_caller_id, "zip_code": zip_code}
         headers = {"X-Api-Key": API_KEY, "Content-Type": "application/json; charset=utf-8"}
         
         try:
