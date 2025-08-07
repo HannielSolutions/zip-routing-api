@@ -16,73 +16,68 @@ CAMPAIGN_ID = "323747"
 OFFERS = {"tier_1": "11558", "tier_2": "22222", "tier_3": "33333"}
 
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/HannielSolutions/zip-routing-api/main"
+# Since all data is in one file, we can use the same file for all tiers
 SHEET_FILES = {
     "tier_1": f"{GITHUB_BASE_URL}/Tier%201.xlsx",
-    "tier_2": f"{GITHUB_BASE_URL}/Tier%202.xlsx", 
-    "tier_3": f"{GITHUB_BASE_URL}/Tier%203.xlsx"
+    "tier_2": f"{GITHUB_BASE_URL}/Tier%201.xlsx",  # Same file, different filter
+    "tier_3": f"{GITHUB_BASE_URL}/Tier%201.xlsx"   # Same file, different filter
 }
 
 def download_and_process_excel(url, tier):
-    """Download and process Excel file in one go."""
+    """Download and process Excel file - handle the actual structure with PriceTier column."""
     try:
         logger.info(f"Downloading {tier} from {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         logger.info(f"Downloaded {len(response.content)} bytes for {tier}")
         
-        # Try multiple reading approaches
+        # Read the Excel file
         content = io.BytesIO(response.content)
+        df = pd.read_excel(content)
+        logger.info(f"Excel shape: {df.shape}")
+        logger.info(f"Columns: {df.columns.tolist()}")
         
-        # First, let's see what pandas can actually read
-        logger.info(f"File size: {len(response.content)} bytes")
-        logger.info(f"First 100 bytes: {response.content[:100]}")
+        if df.empty:
+            return set()
         
-        # Approach 1: Read all data, no headers
-        try:
-            logger.info(f"Trying to read Excel file for {tier}")
-            df = pd.read_excel(content, header=None)
-            logger.info(f"Successfully read Excel: shape {df.shape}")
-            logger.info(f"DataFrame columns: {df.columns.tolist()}")
+        # The file has "Zip Code" and "PriceTier" columns
+        # We need to filter by the tier we want
+        tier_mapping = {
+            "tier_1": "Tier 1",
+            "tier_2": "Tier 2", 
+            "tier_3": "Tier 3"
+        }
+        
+        target_tier = tier_mapping.get(tier)
+        if not target_tier:
+            logger.error(f"Unknown tier: {tier}")
+            return set()
+        
+        # Filter rows where PriceTier matches our target
+        if 'PriceTier' in df.columns and 'Zip Code' in df.columns:
+            filtered_df = df[df['PriceTier'] == target_tier]
+            logger.info(f"Found {len(filtered_df)} rows for {target_tier}")
             
-            # Show ALL data in first column
-            if not df.empty and len(df.columns) > 0:
-                first_col_data = df.iloc[:, 0].tolist()
-                logger.info(f"ALL data in first column ({len(first_col_data)} rows): {first_col_data}")
-                
-                # Convert everything to string and check each value
-                zip_codes = []
-                for i, val in enumerate(first_col_data):
-                    val_str = str(val).strip()
-                    logger.info(f"Row {i}: '{val}' -> '{val_str}' (type: {type(val)})")
-                    
-                    # Skip header-like values
-                    if val_str.lower() in ['zip code', 'zipcode', 'zip', 'nan']:
-                        logger.info(f"  Skipping header/nan: {val_str}")
-                        continue
-                    
-                    # Check if it's numeric and reasonable length
-                    if val_str.isdigit() and 3 <= len(val_str) <= 5:
-                        padded = val_str.zfill(5)
-                        zip_codes.append(padded)
-                        logger.info(f"  Added ZIP: {val_str} -> {padded}")
-                    else:
-                        logger.info(f"  Not a ZIP code: {val_str}")
-                
-                logger.info(f"Final ZIP codes found: {zip_codes}")
-                return set(zip_codes)
-            else:
-                logger.error(f"DataFrame is empty or has no columns for {tier}")
-                return set()
+            # Get ZIP codes and convert to 5-digit strings
+            zip_codes = []
+            for zip_val in filtered_df['Zip Code']:
+                if pd.notna(zip_val):
+                    zip_str = str(int(zip_val)).zfill(5)  # Convert to int first to remove decimals, then pad
+                    zip_codes.append(zip_str)
             
-        except Exception as e:
-            logger.error(f"Excel reading failed for {tier}: {e}")
-            logger.error(f"Exception type: {type(e)}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
+            logger.info(f"Extracted ZIP codes for {tier}: {zip_codes[:20]}")
+            logger.info(f"Total ZIP codes for {tier}: {len(zip_codes)}")
+            logger.info(f"Contains 07004: {'07004' in zip_codes}")
+            
+            return set(zip_codes)
+        else:
+            logger.error(f"Expected columns not found. Available columns: {df.columns.tolist()}")
             return set()
             
     except Exception as e:
         logger.error(f"Failed to process {tier}: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return set()
 
 @lru_cache(maxsize=1)
