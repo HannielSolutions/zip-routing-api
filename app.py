@@ -33,36 +33,52 @@ def download_and_process_excel(url, tier):
         # Try multiple reading approaches
         content = io.BytesIO(response.content)
         
+        # First, let's see what pandas can actually read
+        logger.info(f"File size: {len(response.content)} bytes")
+        logger.info(f"First 100 bytes: {response.content[:100]}")
+        
         # Approach 1: Read all data, no headers
         try:
-            logger.info(f"Trying approach 1 for {tier}")
+            logger.info(f"Trying to read Excel file for {tier}")
             df = pd.read_excel(content, header=None)
-            logger.info(f"Read Excel: shape {df.shape}")
+            logger.info(f"Successfully read Excel: shape {df.shape}")
+            logger.info(f"DataFrame columns: {df.columns.tolist()}")
             
-            # Get all values from first column as strings
-            all_values = df.iloc[:, 0].astype(str).tolist()
-            logger.info(f"All values in first column: {all_values[:20]}")
-            
-            # Filter for ZIP codes (5-digit numbers, including those that start with 0)
-            zip_codes = []
-            for val in all_values:
-                # Clean the value
-                cleaned = str(val).strip()
-                # Check if it's a valid ZIP code (3-5 digits)
-                if cleaned.isdigit() and 3 <= len(cleaned) <= 5:
-                    # Pad to 5 digits
-                    padded = cleaned.zfill(5)
-                    zip_codes.append(padded)
-                    logger.info(f"Found ZIP: {cleaned} -> {padded}")
-            
-            logger.info(f"Extracted {len(zip_codes)} ZIP codes for {tier}")
-            logger.info(f"First 20 ZIP codes: {zip_codes[:20]}")
-            logger.info(f"Contains 07004: {'07004' in zip_codes}")
-            
-            return set(zip_codes)
+            # Show ALL data in first column
+            if not df.empty and len(df.columns) > 0:
+                first_col_data = df.iloc[:, 0].tolist()
+                logger.info(f"ALL data in first column ({len(first_col_data)} rows): {first_col_data}")
+                
+                # Convert everything to string and check each value
+                zip_codes = []
+                for i, val in enumerate(first_col_data):
+                    val_str = str(val).strip()
+                    logger.info(f"Row {i}: '{val}' -> '{val_str}' (type: {type(val)})")
+                    
+                    # Skip header-like values
+                    if val_str.lower() in ['zip code', 'zipcode', 'zip', 'nan']:
+                        logger.info(f"  Skipping header/nan: {val_str}")
+                        continue
+                    
+                    # Check if it's numeric and reasonable length
+                    if val_str.isdigit() and 3 <= len(val_str) <= 5:
+                        padded = val_str.zfill(5)
+                        zip_codes.append(padded)
+                        logger.info(f"  Added ZIP: {val_str} -> {padded}")
+                    else:
+                        logger.info(f"  Not a ZIP code: {val_str}")
+                
+                logger.info(f"Final ZIP codes found: {zip_codes}")
+                return set(zip_codes)
+            else:
+                logger.error(f"DataFrame is empty or has no columns for {tier}")
+                return set()
             
         except Exception as e:
-            logger.error(f"Approach 1 failed for {tier}: {e}")
+            logger.error(f"Excel reading failed for {tier}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return set()
             
     except Exception as e:
@@ -77,6 +93,66 @@ def load_zip_sets():
         zip_sets[tier] = download_and_process_excel(url, tier)
         logger.info(f"Loaded {len(zip_sets[tier])} ZIPs for {tier}")
     return zip_sets
+
+# Raw inspection endpoint
+@app.route("/inspect-file/<tier>", methods=["GET"])
+def inspect_file(tier):
+    if tier not in SHEET_FILES:
+        return jsonify({"error": "Invalid tier"}), 400
+    
+    url = SHEET_FILES[tier]
+    try:
+        # Download raw file
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        content = response.content
+        
+        # Try to read with pandas in multiple ways
+        results = {}
+        
+        # Method 1: Read everything, no assumptions
+        try:
+            df1 = pd.read_excel(io.BytesIO(content))
+            results["method1_default"] = {
+                "shape": df1.shape,
+                "columns": df1.columns.tolist(),
+                "first_10_rows": df1.head(10).to_dict('records')
+            }
+        except Exception as e:
+            results["method1_default"] = {"error": str(e)}
+        
+        # Method 2: Read with no header
+        try:
+            df2 = pd.read_excel(io.BytesIO(content), header=None)
+            results["method2_no_header"] = {
+                "shape": df2.shape,
+                "first_column_first_20": df2.iloc[:20, 0].tolist() if not df2.empty else []
+            }
+        except Exception as e:
+            results["method2_no_header"] = {"error": str(e)}
+        
+        # Method 3: Check if it's actually an Excel file
+        try:
+            # Try to identify file format
+            is_excel = content.startswith(b'PK') or content.startswith(b'\xd0\xcf\x11\xe0')
+            results["file_analysis"] = {
+                "size": len(content),
+                "first_50_bytes": content[:50].hex(),
+                "appears_to_be_excel": is_excel,
+                "starts_with_pk": content.startswith(b'PK'),  # ZIP/XLSX format
+                "starts_with_d0cf": content.startswith(b'\xd0\xcf\x11\xe0')  # Old Excel format
+            }
+        except Exception as e:
+            results["file_analysis"] = {"error": str(e)}
+        
+        return jsonify({
+            "tier": tier,
+            "url": url,
+            "analysis": results
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e), "tier": tier, "url": url})
 
 # Test endpoint
 @app.route("/test-download/<tier>", methods=["GET"])
