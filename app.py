@@ -138,14 +138,16 @@ def handle_call():
             timeout=30
         )
         
-        if response.status_code == 200:
+        # Success codes: 200 (OK) and 201 (Created)
+        if response.status_code in [200, 201]:
             return jsonify({
-                "status": f"ZIP matched {tier.upper()} → Offer {offer_id}",
+                "status": f"SUCCESS: ZIP matched {tier.upper()} → Offer {offer_id}",
                 "zip_code": zip_code,
                 "tier": tier,
                 "offer_id": offer_id,
                 "caller_id_used": caller_id,
-                "marketcall_response": response.json()
+                "marketcall_response": response.json(),
+                "http_status": response.status_code
             }), 200
         else:
             return jsonify({
