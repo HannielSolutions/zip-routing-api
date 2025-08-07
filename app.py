@@ -4,6 +4,8 @@ import pandas as pd
 import os
 from functools import lru_cache
 import logging
+import traceback
+import io
 
 app = Flask(__name__)
 
@@ -28,53 +30,107 @@ SHEET_FILES = {
     "tier_3": f"{GITHUB_BASE_URL}/Tier%203.xlsx"
 }
 
-# === Load ZIPs (with caching and detailed logging) ===
-@lru_cache(maxsize=1)
 def download_excel_from_github(url):
     """Download Excel file from GitHub."""
     try:
+        logger.info(f"Attempting to download: {url}")
         response = requests.get(url, timeout=30)
+        logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response headers: {dict(response.headers)}")
         response.raise_for_status()
+        logger.info(f"Successfully downloaded {len(response.content)} bytes")
         return response.content
     except Exception as e:
         logger.error(f"Failed to download {url}: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return None
 
+def test_excel_processing(content, tier):
+    """Test Excel processing with detailed logging."""
+    try:
+        logger.info(f"Processing Excel content for {tier}, size: {len(content)} bytes")
+        
+        # Try to read Excel from bytes
+        df = pd.read_excel(io.BytesIO(content), usecols=[0], dtype={0: str})
+        logger.info(f"Excel loaded successfully, shape: {df.shape}")
+        logger.info(f"Column names: {df.columns.tolist()}")
+        
+        if df.empty:
+            logger.warning(f"DataFrame is empty for {tier}")
+            return set()
+        
+        # Show first few rows
+        logger.info(f"First 5 rows raw data: {df.iloc[:5, 0].tolist()}")
+        
+        # Process ZIP codes
+        zip_column = df.iloc[:, 0]
+        logger.info(f"Original ZIP column type: {zip_column.dtype}")
+        
+        # Convert to string and clean
+        zip_list = zip_column.astype(str).str.strip()
+        logger.info(f"After string conversion: {zip_list.head().tolist()}")
+        
+        # Remove NaN values
+        zip_list_clean = zip_list.dropna()
+        logger.info(f"After dropping NaN: {zip_list_clean.head().tolist()}")
+        
+        # Zero fill to 5 digits
+        zip_list_padded = zip_list_clean.str.zfill(5)
+        logger.info(f"After zero padding: {zip_list_padded.head().tolist()}")
+        
+        zip_set = set(zip_list_padded)
+        logger.info(f"Final ZIP set size: {len(zip_set)}")
+        logger.info(f"Sample ZIPs: {list(zip_set)[:10]}")
+        
+        return zip_set
+        
+    except Exception as e:
+        logger.error(f"Error processing Excel for {tier}: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return set()
+
+# === Load ZIPs (with detailed error logging) ===
+@lru_cache(maxsize=1)
 def load_zip_sets():
     """Load ZIP codes from Excel files and cache the result."""
     zip_sets = {}
     for tier, url in SHEET_FILES.items():
-        try:
-            logger.info(f"Downloading {tier} from GitHub...")
-            excel_content = download_excel_from_github(url)
-            
-            if excel_content is None:
-                logger.warning(f"Could not download file for {tier}")
-                zip_sets[tier] = set()
-                continue
-            
-            # Read Excel from bytes
-            import io
-            df = pd.read_excel(io.BytesIO(excel_content), usecols=[0], dtype={0: str})
-            
-            if df.empty:
-                logger.warning(f"Empty file for {tier}")
-                zip_sets[tier] = set()
-                continue
-            
-            logger.info(f"Raw data from {tier}: {df.iloc[:5, 0].tolist()}")  # Show first 5 rows
-            
-            zip_list = df.iloc[:, 0].astype(str).str.zfill(5).str.strip()
-            zip_list = zip_list.dropna()
-            zip_sets[tier] = set(zip_list)
-            
-            logger.info(f"{tier} ZIPs loaded: {len(zip_sets[tier])}")
-            logger.info(f"Sample ZIPs from {tier}: {list(zip_sets[tier])[:10]}")  # Show first 10 ZIPs
-            
-        except Exception as e:
-            logger.error(f"Failed to load ZIPs for {tier}: {e}")
+        logger.info(f"Starting to load {tier} from {url}")
+        
+        excel_content = download_excel_from_github(url)
+        if excel_content is None:
+            logger.error(f"Could not download file for {tier}")
             zip_sets[tier] = set()
+            continue
+        
+        zip_sets[tier] = test_excel_processing(excel_content, tier)
+        logger.info(f"Completed loading {tier}: {len(zip_sets[tier])} ZIPs")
+    
     return zip_sets
+
+# === Test download endpoint ===
+@app.route("/test-download/<tier>", methods=["GET"])
+def test_download(tier):
+    """Test downloading and processing a specific tier file."""
+    if tier not in SHEET_FILES:
+        return jsonify({"error": "Invalid tier"}), 400
+    
+    url = SHEET_FILES[tier]
+    content = download_excel_from_github(url)
+    
+    if content is None:
+        return jsonify({"error": "Download failed", "url": url}), 500
+    
+    zip_set = test_excel_processing(content, tier)
+    
+    return jsonify({
+        "tier": tier,
+        "url": url,
+        "content_size": len(content),
+        "zip_count": len(zip_set),
+        "sample_zips": list(zip_set)[:20],
+        "contains_07004": "07004" in zip_set
+    })
 
 # === Debug endpoint to check loaded ZIPs ===
 @app.route("/debug-zips", methods=["GET"])
@@ -86,7 +142,7 @@ def debug_zips():
     for tier, zips in zip_sets.items():
         debug_info[tier] = {
             "count": len(zips),
-            "sample_zips": list(zips)[:20] if zips else [],  # Show first 20
+            "sample_zips": list(zips)[:20] if zips else [],
             "contains_07004": "07004" in zips,
             "file_url": SHEET_FILES[tier],
             "source": "GitHub"
@@ -185,7 +241,6 @@ def handle_call():
         
         if not tier:
             logger.info(f"ZIP {zip_code} not found in any tier")
-            # Return more debug info when ZIP not found
             return jsonify({
                 "status": "ZIP code not in any tier — no ping sent",
                 "zip_code": zip_code,
