@@ -14,34 +14,36 @@ OFFERS = {
     "tier_3": "33333"
 }
 
-EXCEL_FILES = {
+# Corrected Excel files dict
+SHEET_FILES = {
     "tier_1": "Tier 1.xlsx",
     "tier_2": "Tier 2.xlsx",
     "tier_3": "Tier 3.xlsx"
 }
 
-# Load ZIP codes from Excel files
+# ✅ Only load column A, make sure ZIPs are 5-digit strings
 def load_zip_sets():
     zip_sets = {}
-    for tier, filepath in EXCEL_FILES.items():
+    for tier, filename in SHEET_FILES.items():
         try:
-            df = pd.read_excel(filepath)
-            zip_column = df.columns[0]
-            zip_sets[tier] = set(df[zip_column].astype(str).str.strip())
+            df = pd.read_excel(filename, usecols=[0])  # Only first column
+            zip_sets[tier] = set(df.iloc[:, 0].astype(str).str.zfill(5).str.strip())
         except Exception as e:
-            print(f"Error loading {tier} ZIPs: {e}")
+            print(f"Failed to load ZIPs for {tier}: {e}")
             zip_sets[tier] = set()
     return zip_sets
 
+# Home route for testing
 @app.route("/", methods=["GET"])
 def home():
     return "Webhook is running"
 
+# Webhook route
 @app.route("/call-event", methods=["POST"])
 def handle_call():
     data = request.json
     caller_id = data.get("caller_id")
-    zip_code = str(data.get("zip_code")).strip()
+    zip_code = str(data.get("zip_code")).strip().zfill(5)
 
     if not caller_id or not zip_code:
         return jsonify({"error": "Missing caller_id or zip_code"}), 400
